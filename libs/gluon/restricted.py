@@ -2,9 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-This file is part of the web2py Web Framework
-Copyrighted by Massimo Di Pierro <mdipierro@cs.depaul.edu>
-License: LGPLv3 (http://www.gnu.org/licenses/lgpl.html)
+| This file is part of the web2py Web Framework
+| Copyrighted by Massimo Di Pierro <mdipierro@cs.depaul.edu>
+| License: LGPLv3 (http://www.gnu.org/licenses/lgpl.html)
+
+Restricted environment to execute application's code
+-----------------------------------------------------
 """
 
 import sys
@@ -26,7 +29,7 @@ __all__ = ['RestrictedError', 'restricted', 'TicketStorage', 'compile2']
 class TicketStorage(Storage):
 
     """
-    defines the ticket object and the default values of its members (None)
+    Defines the ticket object and the default values of its members (None)
     """
 
     def __init__(
@@ -40,7 +43,7 @@ class TicketStorage(Storage):
 
     def store(self, request, ticket_id, ticket_data):
         """
-        stores the ticket. It will figure out if this must be on disk or in db
+        Stores the ticket. It will figure out if this must be on disk or in db
         """
         if self.db:
             self._store_in_db(request, ticket_id, ticket_data)
@@ -48,11 +51,19 @@ class TicketStorage(Storage):
             self._store_on_disk(request, ticket_id, ticket_data)
 
     def _store_in_db(self, request, ticket_id, ticket_data):
-        table = self._get_table(self.db, self.tablename, request.application)
-        table.insert(ticket_id=ticket_id,
-                     ticket_data=cPickle.dumps(ticket_data),
-                     created_datetime=request.now)
-        logger.error('In FILE: %(layer)s\n\n%(traceback)s\n' % ticket_data)
+        self.db._adapter.reconnect()
+        try:
+            table = self._get_table(self.db, self.tablename, request.application)
+            table.insert(ticket_id=ticket_id,
+                         ticket_data=cPickle.dumps(ticket_data),
+                         created_datetime=request.now)
+            self.db.commit()
+            message = 'In FILE: %(layer)s\n\n%(traceback)s\n'
+        except Exception:
+            self.db.rollback()
+            message =' Unable to store in FILE: %(layer)s\n\n%(traceback)s\n'
+        self.db.close()
+        logger.error(message % ticket_data)
 
     def _store_on_disk(self, request, ticket_id, ticket_data):
         ef = self._error_file(request, ticket_id, 'wb')
@@ -71,16 +82,13 @@ class TicketStorage(Storage):
 
     def _get_table(self, db, tablename, app):
         tablename = tablename + '_' + app
-        table = db.get(tablename, None)
-        if table is None:
-            db.rollback()   # not necessary but one day
-                            # any app may store tickets on DB
+        table = db.get(tablename)
+        if not table:
             table = db.define_table(
                 tablename,
                 db.Field('ticket_id', length=100),
                 db.Field('ticket_data', 'text'),
-                db.Field('created_datetime', 'datetime'),
-            )
+                db.Field('created_datetime', 'datetime'))
         return table
 
     def load(
@@ -106,8 +114,8 @@ class TicketStorage(Storage):
 
 class RestrictedError(Exception):
     """
-    class used to wrap an exception that occurs in the restricted environment
-    below. the traceback is used to log the exception and generate a ticket.
+    Class used to wrap an exception that occurs in the restricted environment
+    below. The traceback is used to log the exception and generate a ticket.
     """
 
     def __init__(
@@ -118,7 +126,7 @@ class RestrictedError(Exception):
         environment=None,
     ):
         """
-        layer here is some description of where in the system the exception
+        Layer here is some description of where in the system the exception
         occurred.
         """
         if environment is None:
@@ -143,7 +151,7 @@ class RestrictedError(Exception):
 
     def log(self, request):
         """
-        logs the exception.
+        Logs the exception.
         """
 
         try:
@@ -163,7 +171,7 @@ class RestrictedError(Exception):
 
     def load(self, request, app, ticket_id):
         """
-        loads a logged exception.
+        Loads a logged exception.
         """
         ticket_storage = TicketStorage(db=request.tickets_db)
         d = ticket_storage.load(request, app, ticket_id)
@@ -196,8 +204,8 @@ def compile2(code, layer):
 
 def restricted(code, environment=None, layer='Unknown'):
     """
-    runs code in environment and returns the output. if an exception occurs
-    in code it raises a RestrictedError containing the traceback. layer is
+    Runs code in environment and returns the output. If an exception occurs
+    in code it raises a RestrictedError containing the traceback. Layer is
     passed to RestrictedError to identify where the error occurred.
     """
     if environment is None:

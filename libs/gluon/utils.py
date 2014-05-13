@@ -11,8 +11,6 @@ This file specifically includes utilities for security.
 
 import threading
 import struct
-#import hashlib
-#import hmac
 import uuid
 import random
 import time
@@ -23,7 +21,7 @@ import logging
 import socket
 import base64
 import zlib
-from types import ModuleType
+
 
 _struct_2_long_long = struct.Struct('=QQ')
 
@@ -39,12 +37,15 @@ from hashlib import md5, sha1, sha224, sha256, sha384, sha512
 try:
     from Crypto.Cipher import AES
 except ImportError:
-    import contrib.aes as AES
+    import gluon.contrib.aes as AES
 
 import hmac
 
 try:
-    from contrib.pbkdf2 import pbkdf2_hex
+    try:
+        from gluon.contrib.pbkdf2_ctypes import pbkdf2_hex
+    except (ImportError, AttributeError):
+        from gluon.contrib.pbkdf2 import pbkdf2_hex
     HAVE_PBKDF2 = True
 except ImportError:
     try:
@@ -167,7 +168,7 @@ def secure_loads(data, encryption_key, hash_key=None, compression_level=None):
         if compression_level:
             data = zlib.decompress(data)
         return pickle.loads(data)
-    except (TypeError, pickle.UnpicklingError):
+    except Exception, e:
         return None
 
 ### compute constant CTOKENS
@@ -309,7 +310,7 @@ def is_loopback_ip_address(ip=None, addrinfo=None):
     if not isinstance(ip, basestring):
         return False
     # IPv4 or IPv6-embedded IPv4 or IPv4-compatible IPv6
-    if ip.count('.') == 3:  
+    if ip.count('.') == 3:
         return ip.lower().startswith(('127', '::127', '0:0:0:0:0:0:127',
                                       '::ffff:127', '0:0:0:0:0:ffff:127'))
     return ip == '::1' or ip == '0:0:0:0:0:0:0:1'   # IPv6 loopback
@@ -321,7 +322,7 @@ def getipaddrinfo(host):
     """
     try:
         return [addrinfo for addrinfo in socket.getaddrinfo(host, None)
-                if (addrinfo[0] == socket.AF_INET or 
+                if (addrinfo[0] == socket.AF_INET or
                     addrinfo[0] == socket.AF_INET6)
                 and isinstance(addrinfo[4][0], basestring)]
     except socket.error:

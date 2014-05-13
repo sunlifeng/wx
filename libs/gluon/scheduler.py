@@ -73,13 +73,10 @@ import optparse
 import types
 import Queue
 
-if 'WEB2PY_PATH' in os.environ:
-    sys.path.append(os.environ['WEB2PY_PATH'])
-else:
-    os.environ['WEB2PY_PATH'] = os.getcwd()
+path = os.getcwd()
 
-if not os.environ['WEB2PY_PATH'] in sys.path:
-    sys.path.append(os.environ['WEB2PY_PATH'])
+if 'WEB2PY_PATH' not in os.environ:
+    os.environ['WEB2PY_PATH'] = path
 
 try:
     from gluon.contrib.simplejson import loads, dumps
@@ -90,7 +87,8 @@ IDENTIFIER = "%s#%s" % (socket.gethostname(),os.getpid())
 
 logger = logging.getLogger('web2py.scheduler.%s' % IDENTIFIER)
 
-from gluon import DAL, Field, IS_NOT_EMPTY, IS_IN_SET, IS_NOT_IN_DB, IS_INT_IN_RANGE, IS_DATETIME
+from gluon import DAL, Field, IS_NOT_EMPTY, IS_IN_SET, IS_NOT_IN_DB
+from gluon import IS_INT_IN_RANGE, IS_DATETIME
 from gluon.utils import web2py_uuid
 from gluon.storage import Storage
 
@@ -231,6 +229,9 @@ def executor(queue, task, out):
                     "name '%s' not found in scheduler's environment" % f)
             #Inject W2P_TASK into environment
             _env.update({'W2P_TASK' : W2P_TASK})
+            #Inject W2P_TASK into current
+            from gluon import current
+            current.W2P_TASK = W2P_TASK
             globals().update(_env)
             args = loads(task.args)
             vars = loads(task.vars, object_hook=_decode_dict)
@@ -240,10 +241,10 @@ def executor(queue, task, out):
             result = eval(task.function)(
                 *loads(task.args, object_hook=_decode_dict),
                 **loads(task.vars, object_hook=_decode_dict))
-        queue.put(TaskReport(COMPLETED, result=result))
+        queue.put(TaskReport('COMPLETED', result=result))
     except BaseException, e:
         tb = traceback.format_exc()
-        queue.put(TaskReport(FAILED, tb=tb))
+        queue.put(TaskReport('FAILED', tb=tb))
     del stdout
 
 
@@ -253,6 +254,7 @@ class MetaScheduler(threading.Thread):
         self.process = None     # the background process
         self.have_heartbeat = True   # set to False to kill
         self.empty_runs = 0
+
 
     def async(self, task):
         """
@@ -455,6 +457,15 @@ class Scheduler(MetaScheduler):
 
         self.define_tables(db, migrate=migrate)
 
+    def __get_migrate(self, tablename, migrate=True):
+        if migrate is False:
+            return False
+        elif migrate is True:
+            return True
+        elif isinstance(migrate, str):
+            return "%s%s.table" % (migrate , tablename)
+        return True
+
     def now(self):
         return self.utc_time and datetime.datetime.utcnow() or datetime.datetime.now()
 
@@ -496,6 +507,8 @@ class Scheduler(MetaScheduler):
                   requires=IS_INT_IN_RANGE(-1, None)),
             Field('period', 'integer', default=60, comment='seconds',
                   requires=IS_INT_IN_RANGE(0, None)),
+            Field('prevent_drift', 'boolean', default=False,
+                  comment='Cron-like start_times between runs'),
             Field('timeout', 'integer', default=60, comment='seconds',
                   requires=IS_INT_IN_RANGE(0, None)),
             Field('sync_output', 'integer', default=0,
@@ -506,7 +519,8 @@ class Scheduler(MetaScheduler):
             Field('last_run_time', 'datetime', writable=False, readable=False),
             Field('assigned_worker_name', default='', writable=False),
             on_define=self.set_requirements,
-            migrate=migrate, format='%(task_name)s')
+            migrate=self.__get_migrate('scheduler_task', migrate),
+            format='%(task_name)s')
 
         db.define_table(
             'scheduler_run',
@@ -518,7 +532,8 @@ class Scheduler(MetaScheduler):
             Field('run_result', 'text'),
             Field('traceback', 'text'),
             Field('worker_name', default=self.worker_name),
-            migrate=migrate)
+            migrate=self.__get_migrate('scheduler_run', migrate)
+            )
 
         db.define_table(
             'scheduler_worker',
@@ -527,9 +542,11 @@ class Scheduler(MetaScheduler):
             Field('last_heartbeat', 'datetime'),
             Field('status', requires=IS_IN_SET(WORKER_STATUS)),
             Field('is_ticker', 'boolean', default=False, writable=False),
-            Field('group_names', 'list:string', default=self.group_names),#FIXME writable=False or give the chance to update dinamically the groups?
-            migrate=migrate)
-        if migrate:
+            Field('group_names', 'list:string', default=self.group_names),
+            migrate=self.__get_migrate('scheduler_worker', migrate)
+            )
+
+        if migrate is not False:
             db.commit()
 
     def loop(self, worker_name=None):
@@ -620,9 +637,15 @@ class Scheduler(MetaScheduler):
             else:
                 logger.info('nothing to do')
             return None
-        next_run_time = task.last_run_time + datetime.timedelta(
-            seconds=task.period)
         times_run = task.times_run + 1
+        if not task.prevent_drift:
+            next_run_time = task.last_run_time + datetime.timedelta(
+                seconds=task.period
+                )
+        else:
+            next_run_time = task.start_time + datetime.timedelta(
+                seconds=task.period * times_run
+            )
         if times_run < task.repeats or task.repeats == 0:
             #need to run (repeating task)
             run_again = True
@@ -897,10 +920,10 @@ class Scheduler(MetaScheduler):
                     )
                     if not task.task_name:
                         d['task_name'] = task.function_name
-                    task.update_record(**d)
+                    db((st.id==task.id) & (st.status.belongs((QUEUED, ASSIGNED)))).update(**d)
+                    db.commit()
                     wkgroups[gname]['workers'][myw]['c'] += 1
 
-        db.commit()
         #I didn't report tasks but I'm working nonetheless!!!!
         if x > 0:
             self.empty_runs = 0

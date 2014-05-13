@@ -28,7 +28,7 @@
     var map = {
       name : "autoCloseBrackets",
       Backspace: function(cm) {
-        if (cm.somethingSelected()) return CodeMirror.Pass;
+        if (cm.somethingSelected() || cm.getOption("disableInput")) return CodeMirror.Pass;
         var cur = cm.getCursor(), around = charsAround(cm, cur);
         if (around && pairs.indexOf(around) % 2 == 0)
           cm.replaceRange("", CodeMirror.Pos(cur.line, cur.ch - 1), CodeMirror.Pos(cur.line, cur.ch + 1));
@@ -49,12 +49,15 @@
         else cm.execCommand("goCharRight");
       }
       map["'" + left + "'"] = function(cm) {
-        if (left == "'" && cm.getTokenAt(cm.getCursor()).type == "comment")
+        if (left == "'" && cm.getTokenAt(cm.getCursor()).type == "comment" ||
+            cm.getOption("disableInput"))
           return CodeMirror.Pass;
         if (cm.somethingSelected()) return surround(cm);
         if (left == right && maybeOverwrite(cm) != CodeMirror.Pass) return;
         var cur = cm.getCursor(), ahead = CodeMirror.Pos(cur.line, cur.ch + 1);
-        var line = cm.getLine(cur.line), nextChar = line.charAt(cur.ch);
+        var line = cm.getLine(cur.line), nextChar = line.charAt(cur.ch), curChar = cur.ch > 0 ? line.charAt(cur.ch - 1) : "";
+        if (left == right && CodeMirror.isWordChar(curChar))
+          return CodeMirror.Pass;
         if (line.length == cur.ch || closingBrackets.indexOf(nextChar) >= 0 || SPACE_CHAR_REGEX.test(nextChar))
           cm.replaceSelection(left + right, {head: ahead, anchor: ahead});
         else
@@ -68,7 +71,8 @@
   function buildExplodeHandler(pairs) {
     return function(cm) {
       var cur = cm.getCursor(), around = charsAround(cm, cur);
-      if (!around || pairs.indexOf(around) % 2 != 0) return CodeMirror.Pass;
+      if (!around || pairs.indexOf(around) % 2 != 0 || cm.getOption("disableInput"))
+        return CodeMirror.Pass;
       cm.operation(function() {
         var newPos = CodeMirror.Pos(cur.line + 1, 0);
         cm.replaceSelection("\n\n", {anchor: newPos, head: newPos}, "+input");
