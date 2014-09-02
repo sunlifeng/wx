@@ -109,6 +109,7 @@ __all__ = [
     'embed64',
 ]
 
+DEFAULT_PASSWORD_DISPLAY = '*' * 8
 
 def xmlescape(data, quote=True):
     """
@@ -307,6 +308,13 @@ def URL(
         # if the url gets a static resource, don't force extention
         if controller == 'static':
             extension = None
+            # add static version to url
+            from globals import current
+            if hasattr(current, 'response'):
+                response = current.response
+                if response.static_version and response.static_version_urls:
+                    args = [function] + args
+                    function = '_'+str(response.static_version)
 
         if '.' in function:
             function, extension = function.rsplit('.', 1)
@@ -1839,15 +1847,19 @@ class INPUT(DIV):
         if requires:
             if not isinstance(requires, (list, tuple)):
                 requires = [requires]
-            for validator in requires:
-                (value, errors) = validator(value)
+            for k,validator in enumerate(requires):
+                try:
+                    (value, errors) = validator(value)
+                except:
+                    msg = "Validation error, field:%s %s" % (name,validator)
+                    raise Exception(msg)
                 if not errors is None:
                     self.vars[name] = value
                     self.errors[name] = errors
                     break
         if not name in self.errors:
             self.vars[name] = value
-            return True
+            return True        
         return False
 
     def _postprocessing(self):
@@ -1856,6 +1868,7 @@ class INPUT(DIV):
             t = self['_type'] = 'text'
         t = t.lower()
         value = self['value']
+
         if self['_value'] is None or isinstance(self['_value'],cgi.FieldStorage):
             _value = None
         else:
@@ -1877,11 +1890,14 @@ class INPUT(DIV):
                 self['_checked'] = 'checked'
             else:
                 self['_checked'] = None
+        elif t == 'password' and value != DEFAULT_PASSWORD_DISPLAY:
+            self['value'] = ''
         elif not t == 'submit':
             if value is None:
                 self['value'] = _value
             elif not isinstance(value, list):
                 self['_value'] = value
+
 
     def xml(self):
         name = self.attributes.get('_name', None)
@@ -2094,7 +2110,7 @@ class FORM(DIV):
             status = False
         if status and session:
             # check if editing a record that has been modified by the server
-            if hasattr(self, 'record_hash') and self.record_hash != formkey:
+            if hasattr(self, 'record_hash') and self.record_hash != formkey.split(':')[0]:
                 status = False
                 self.record_changed = changed = True
         status = self._traverse(status, hideerror)
@@ -2122,7 +2138,7 @@ class FORM(DIV):
             status = False
         if not session is None:
             if hasattr(self, 'record_hash'):
-                formkey = self.record_hash
+                formkey = self.record_hash+':'+web2py_uuid()
             else:
                 formkey = web2py_uuid()
             self.formkey = formkey
