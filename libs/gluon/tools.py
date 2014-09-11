@@ -2710,7 +2710,8 @@ class Auth(object):
             extra_fields = [
                 Field("password_two", "password", requires=IS_EQUAL_TO(
                         request.post_vars.get(passfield,None),
-                        error_message=self.messages.mismatched_password))]
+                        error_message=self.messages.mismatched_password),
+                        label=current.T("Confirm Password"))]
         else:
             extra_fields = []
         form = SQLFORM(table_user,
@@ -3007,7 +3008,7 @@ class Auth(object):
 
         if self.settings.prevent_password_reset_attacks:
             key = request.vars.key
-            if not key and len(request.args)>1:
+            if not key and len(request.args)>0:
                 key = request.args[-1]
             if key:
                 session._reset_password_key = key

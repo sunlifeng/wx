@@ -1289,7 +1289,7 @@ class SQLFORM(FORM):
             xfields.append(
                 (self.FIELDKEY_DELETE_RECORD + SQLFORM.ID_ROW_SUFFIX,
                  LABEL(
-                        T(delete_label), separator,
+                        T(delete_label), sep,
                         _for=self.FIELDKEY_DELETE_RECORD,
                         _id=self.FIELDKEY_DELETE_RECORD + \
                             SQLFORM.ID_LABEL_SUFFIX),
@@ -2111,6 +2111,8 @@ class SQLFORM(FORM):
                 field_id = groupby #take the field passed as groupby
             elif groupby and isinstance(groupby, Expression):
                 field_id = groupby.first #take the first groupby field
+                while not(isinstance(field_id, Field)): # Navigate to the first Field of the expression
+                    field_id = field_id.first
         table = field_id.table
         tablename = table._tablename
         if not any(str(f) == str(field_id) for f in fields):

@@ -198,7 +198,6 @@ if PYTHON_VERSION[:2] < (2, 7):
 else:
     from collections import OrderedDict
 
-
 CALLABLETYPES = (types.LambdaType, types.FunctionType,
                  types.BuiltinFunctionType,
                  types.MethodType, types.BuiltinMethodType)
@@ -4587,24 +4586,28 @@ class CubridAdapter(MySQLAdapter):
 ######## GAE MySQL ##########
 class DatabaseStoredFile:
 
-    web2py_filesystem = False
+    web2py_filesystems = set()
 
     def escape(self, obj):
         return self.db._adapter.escape(obj)
 
+    @staticmethod
+    def try_create_web2py_filesystem(db):
+        if not db._uri in DatabaseStoredFile.web2py_filesystems:
+            if db._adapter.dbengine == 'mysql':
+                sql = "CREATE TABLE IF NOT EXISTS web2py_filesystem (path VARCHAR(255), content LONGTEXT, PRIMARY KEY(path) ) ENGINE=InnoDB;"
+            elif db._adapter.dbengine in ('postgres', 'sqlite'):
+                sql = "CREATE TABLE IF NOT EXISTS web2py_filesystem (path VARCHAR(255), content TEXT, PRIMARY KEY(path));"
+            db.executesql(sql)
+            DatabaseStoredFile.web2py_filesystems.add(db._uri)
+ 
     def __init__(self, db, filename, mode):
         if not db._adapter.dbengine in ('mysql', 'postgres', 'sqlite'):
             raise RuntimeError("only MySQL/Postgres/SQLite can store metadata .table files in database for now")
         self.db = db
         self.filename = filename
         self.mode = mode
-        if not self.web2py_filesystem:
-            if db._adapter.dbengine == 'mysql':
-                sql = "CREATE TABLE IF NOT EXISTS web2py_filesystem (path VARCHAR(255), content LONGTEXT, PRIMARY KEY(path) ) ENGINE=InnoDB;"
-            elif db._adapter.dbengine in ('postgres', 'sqlite'):
-                sql = "CREATE TABLE IF NOT EXISTS web2py_filesystem (path VARCHAR(255), content TEXT, PRIMARY KEY(path));"
-            self.db.executesql(sql)
-            DatabaseStoredFile.web2py_filesystem = True
+        DatabaseStoredFile.try_create_web2py_filesystem(db)
         self.p = 0
         self.data = ''
         if mode in ('r', 'rw', 'a'):
@@ -4655,6 +4658,9 @@ class DatabaseStoredFile:
     def exists(db, filename):
         if exists(filename):
             return True
+
+        DatabaseStoredFile.try_create_web2py_filesystem(db)
+
         query = "SELECT path FROM web2py_filesystem WHERE path='%s'" % filename
         try:
             if db.executesql(query):
@@ -5137,35 +5143,35 @@ class GoogleDatastoreAdapter(NoSQLAdapter):
             return [GAEF(first.name, '!=', self.represent(second, first.type), lambda a, b:a!=b)]
         else:
             if not second is None:
-                second = Key.from_path(first._tablename, long(second))
+                second = self.keyfunc(first._tablename, long(second))
             return [GAEF(first.name, '!=', second, lambda a, b:a!=b)]
 
     def LT(self, first, second=None):
         if first.type != 'id':
             return [GAEF(first.name, '<', self.represent(second, first.type), lambda a, b:a<b)]
         else:
-            second = Key.from_path(first._tablename, long(second))
+            second = self.keyfunc(first._tablename, long(second))
             return [GAEF(first.name, '<', second, lambda a, b:a<b)]
 
     def LE(self, first, second=None):
         if first.type != 'id':
             return [GAEF(first.name, '<=', self.represent(second, first.type), lambda a, b:a<=b)]
         else:
-            second = Key.from_path(first._tablename, long(second))
+            second = self.keyfunc(first._tablename, long(second))
             return [GAEF(first.name, '<=', second, lambda a, b:a<=b)]
 
     def GT(self, first, second=None):
         if first.type != 'id' or second==0 or second == '0':
             return [GAEF(first.name, '>', self.represent(second, first.type), lambda a, b:a>b)]
         else:
-            second = Key.from_path(first._tablename, long(second))
+            second = self.keyfunc(first._tablename, long(second))
             return [GAEF(first.name, '>', second, lambda a, b:a>b)]
 
     def GE(self, first, second=None):
         if first.type != 'id':
             return [GAEF(first.name, '>=', self.represent(second, first.type), lambda a, b:a>=b)]
         else:
-            second = Key.from_path(first._tablename, long(second))
+            second = self.keyfunc(first._tablename, long(second))
             return [GAEF(first.name, '>=', second, lambda a, b:a>=b)]
 
     def INVERT(self, first):
